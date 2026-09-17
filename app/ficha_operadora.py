@@ -5,12 +5,14 @@ Tudo é consultado pela chave da operadora (registro ANS). A lista só oferece o
 
 from __future__ import annotations
 
+from html import escape
+
 import pandas as pd
 import streamlit as st
 
 import charts
-from classificacao import qualidade, reclamacoes
-from data import UF_NOMES, evolucao_operadora, ficha, fmt_dec, fmt_int, fmt_mes
+from classificacao import MINIMO_RESOLUCAO, RECLAMACOES_CURTO, SEMAFORO, qualidade, reclamacoes, resolucao
+from data import UF_NOMES, evolucao_operadora, ficha, fmt_compact, fmt_dec, fmt_int, fmt_mes
 
 MODALIDADES = {
     "Medicina de Grupo": "Empresa de planos de saúde",
@@ -28,6 +30,36 @@ CONTRATACAO = {
     "Coletivo por adesão": "Por associação ou sindicato",
     "Outros / não identificado": "Outros",
 }
+CONTRATACAO_CURTO = {  # rótulo curto, explicação
+    "Coletivo empresarial": ("Empresa", "plano pelo trabalho"),
+    "Individual ou familiar": ("Individual", "contratado direto"),
+    "Coletivo por adesão": ("Adesão", "via sindicato/associação"),
+    "Outros / não identificado": ("Outros", "não informado"),
+}
+# assuntos da ANS em palavras do dia a dia (o nome oficial fica na dica)
+ASSUNTOS = {
+    "Regras para Acesso aos Atendimentos": "Dificuldade para ser atendido",
+    "Rol de Procedimentos e Cobertura Contratual": "Exame ou procedimento negado",
+    "Rede de Atendimento (rede conveniada)": "Rede de médicos e hospitais",
+    "Reembolso": "Reembolso",
+    "Prazos Máximos para Atendimento": "Demora para ser atendido",
+    "Prazos M¿ximos para Atendimento": "Demora para ser atendido",  # erro de codificação na fonte
+    "Suspensão e Rescisão Contratuais": "Plano cancelado ou suspenso",
+    "Mensalidade ou Outras Cobranças": "Cobranças e mensalidade",
+    "Carência": "Carência",
+    "Contratação/Adesão e Vigência Contratual": "Contratação do plano",
+    "Portabilidade de Carências": "Troca de plano (portabilidade)",
+    "Itens Obrigatórios e Cláusulas Contratuais": "Cláusulas do contrato",
+    "Reajuste por Variação de Custos": "Reajuste anual",
+    "Coparticipação e Franquia": "Coparticipação",
+    "Doença ou Lesão Preexistente, CPT e Agravo": "Doença preexistente",
+    "Documentos/Informações Obrigatórias ao Consumidor": "Falta de informação ao cliente",
+    "Inclusão de Dependentes do Consumidor": "Inclusão de dependentes",
+    "Adaptação ou Migração Contratual": "Mudança de contrato",
+    "Reajuste por Mudança de Faixa Etária": "Reajuste por idade",
+    "Demitidos, Exonerados e Aposentados": "Plano após demissão ou aposentadoria",
+}
+ASSUNTOS_NA_FICHA = 5
 PARTES_IDSS = {
     "IDQS": "Qualidade do atendimento",
     "IDGA": "Acesso à rede (consultas, exames)",
@@ -73,131 +105,294 @@ def _lista(itens: list[tuple[str, str | None]]) -> str:
     return "\n".join(f"- **{rotulo}:** {_md(valor)}" for rotulo, valor in itens if valor)
 
 
+def _tempo_de_mercado(data_registro) -> tuple[str, str | None]:
+    if data_registro is None or pd.isna(data_registro):
+        return "–", None
+    anos = (pd.Timestamp.today() - pd.Timestamp(data_registro)).days // 365
+    texto = "menos de 1 ano" if anos < 1 else "1 ano" if anos == 1 else f"{anos} anos"
+    return texto, f"desde {pd.Timestamp(data_registro).year}"
+
+
+def _nota10(idss) -> str:
+    """IDSS (0 a 1) como nota escolar de 0 a 10 ("8,1", "10")."""
+    return fmt_dec(idss * 10, 1).removesuffix(",0")
+
+
+def _quadro(titulo: str, subtitulo: str | None = None, chave: str | None = None):
+    """Seção com borda e título: cada tipo de informação no seu quadro."""
+    quadro = st.container(border=True, key=f"quadro-{chave or abs(hash(titulo))}")
+    quadro.markdown(f"**{titulo}**" + (f" · {subtitulo}" if subtitulo else ""))
+    return quadro
+
+
 def _aba_resumo(c, dados: dict, evo: dict) -> None:
-    col1, col2, col3, col4 = st.columns(4)
-    atua = f"clientes em {int(c.ufs_atuacao)} estados" if pd.notna(c.ufs_atuacao) and c.ufs_atuacao > 1 else None
-    col1.metric("Clientes", fmt_int(c.clientes_brasil), atua, delta_color="off", delta_arrow="off",
-                help="Total de pessoas com plano ativo nesta operadora, em todo o Brasil.")  # fmt: skip
-    col2.metric("Sede", _texto(c.cidade) or "–", UF_NOMES.get(c.uf_sede, c.uf_sede), delta_color="off",
-                delta_arrow="off")  # fmt: skip
+    cima_esq, cima_dir = st.columns(2)
+    # --- sobre a empresa -----------------------------------------------------------------------
+    with cima_esq, _quadro("Sobre a empresa"):
+        col1, col2, col3 = st.columns(3)
+        atua = f"clientes em {int(c.ufs_atuacao)} estados" if pd.notna(c.ufs_atuacao) and c.ufs_atuacao > 1 else None
+        col1.metric("Clientes", fmt_int(c.clientes_brasil), atua, delta_color="off", delta_arrow="off",
+                    help="Total de pessoas com plano ativo nesta operadora, em todo o Brasil.")  # fmt: skip
+        col2.metric("Sede", _texto(c.cidade) or "–", UF_NOMES.get(c.uf_sede, c.uf_sede), delta_color="off",
+                    delta_arrow="off")  # fmt: skip
+        tempo, desde = _tempo_de_mercado(c.data_registro_ans)
+        col3.metric("No mercado há", tempo, desde, delta_color="off", delta_arrow="off",
+                    help="Tempo desde o registro da operadora na ANS.")  # fmt: skip
 
-    with col3:
-        q = qualidade(c.idss)
-        st.metric(
-            "Qualidade (IDSS)",
-            fmt_dec(c.idss, 2) if q else "Sem nota",
-            q[0] if q else None,
-            delta_color=q[1] if q else "off",
-            delta_arrow="off",
-            help="Nota dada pela ANS todo ano, de 0 a 1. Quanto maior, melhor.",
-        )
-        if not evo["idss"].empty:
-            with st.popover("Ver detalhes", icon=":material/insights:", width="stretch"):
-                st.markdown("**Nota de qualidade ano a ano**")
-                st.altair_chart(
-                    charts.colunas(evo["idss"], "ano", lambda v: fmt_dec(v, 2), rotulo_x=str, altura=170),
-                    width="stretch",
-                )
-                if evo["partes_idss"]:
-                    st.markdown(f"**Notas por tema** · avaliação {int(c.idss_ano)}")
-                    for sigla, nome in PARTES_IDSS.items():
-                        nota = evo["partes_idss"].get(sigla)
-                        if nota is not None:
-                            leitura = (qualidade(nota) or ("",))[0]
-                            st.markdown(f"{nome}: **{fmt_dec(nota, 2)}** · {leitura}")
-                            st.progress(float(min(max(nota, 0), 1)))
+    # --- avaliação da ANS ----------------------------------------------------------------------
+    with cima_dir, _quadro("Avaliação da ANS"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            q = qualidade(c.idss)
+            st.metric(
+                "Qualidade (IDSS)",
+                f"{_nota10(c.idss)} de 10" if q else "—",
+                q[0] if q else "sem nota da ANS",
+                delta_color=q[1] if q else "gray",
+                delta_arrow="off",
+                help="Nota de qualidade que a ANS dá todo ano, aqui de 0 a 10 (quanto maior, melhor). "
+                "Considera atendimento, acesso à rede, saúde financeira e gestão. "
+                f"No índice original da ANS (IDSS, de 0 a 1), a nota é {fmt_dec(c.idss, 2)}.",
+            )
 
-    with col4:
-        r = reclamacoes(c.igr, dados["mediana_igr"])
-        st.metric(
-            "Reclamações (IGR)",
-            fmt_dec(c.igr, 1) if r else "Sem índice",
-            r[0] if r else None,
-            delta_color=r[1] if r else "off",
-            delta_arrow="off",
-            help="Índice Geral de Reclamações da ANS: reclamações para cada 100 mil clientes. "
-            f"Quanto menor, melhor. A média das operadoras parecidas é {fmt_dec(dados['mediana_igr'], 1)}.",
-        )
-        if not evo["igr"].empty:
-            with st.popover("Ver detalhes", icon=":material/insights:", width="stretch"):
-                st.markdown("**Índice de reclamações mês a mês** · quanto menor, melhor")
-                st.altair_chart(charts.linha(evo["igr"], lambda v: fmt_dec(v, 1), altura=190), width="stretch")
-                st.caption(f"Média das operadoras parecidas hoje: {fmt_dec(dados['mediana_igr'], 1)}")
+        with col2:
+            r = reclamacoes(c.igr, dados["mediana_igr"])
+            st.metric(
+                "Reclamações (IGR)",
+                fmt_dec(c.igr, 1) if r else "—",
+                RECLAMACOES_CURTO.get(r[0], r[0]) if r else "sem índice da ANS",
+                delta_color=r[1] if r else "gray",
+                delta_arrow="off",
+                help="Índice Geral de Reclamações da ANS: quantas reclamações a operadora recebe para cada "
+                "100 mil clientes. Quanto menor, melhor. A média das operadoras parecidas é "
+                f"{fmt_dec(dados['mediana_igr'], 1)}.",
+            )
 
-    esquerda, direita = st.columns(2, gap="large")
-    with esquerda:
-        st.markdown("**Como os clientes contrataram**")
-        contr = evo["contratacao"].head(4)
-        total = evo["contratacao"]["clientes"].sum()
-        if total:
-            for coluna, linha in zip(st.columns(len(contr)), contr.itertuples(), strict=True):
-                coluna.metric(CONTRATACAO.get(linha.contratacao, linha.contratacao),
-                              f"{fmt_dec(100 * linha.clientes / total, 0)}%", f"{fmt_int(linha.clientes)} clientes",
-                              delta_color="off", delta_arrow="off")  # fmt: skip
-        st.markdown("**Entradas e saídas** · últimos 12 meses")
+        with col3:
+            res = resolucao(c.pct_resolvidas, c.nip_avaliadas_12m)
+            avaliadas = int(c.nip_avaliadas_12m) if pd.notna(c.nip_avaliadas_12m) else 0
+            st.metric(
+                "Reclamações resolvidas",
+                f"{fmt_dec(c.pct_resolvidas, 0)}%" if res else "—",
+                res[0] if res else "poucas para avaliar",
+                delta_color=res[1] if res else "gray",
+                delta_arrow="off",
+                help="Das reclamações feitas à ANS nos últimos 12 meses e já encerradas, quantas a operadora "
+                "resolveu direto com o cliente, sem virar processo. "
+                + (f"Foram {fmt_int(c.nip_resolvidas_12m)} de {fmt_int(avaliadas)}." if avaliadas else "")
+                + f" Só é avaliada com {MINIMO_RESOLUCAO} ou mais reclamações encerradas.",
+            )
+
+    fluxo, contratos, queixas = st.columns([5.5, 4, 5.5])
+    # --- entradas e saídas -------------------------------------------------------------------
+    with fluxo, _quadro("Clientes nos últimos 12 meses", chave="resumo-baixo-1"):
         entraram, sairam = evo["entraram"], evo["sairam"]
-        a, b, c3 = st.columns(3)
-        a.metric("Entraram", fmt_int(entraram))
-        b.metric("Saíram", fmt_int(sairam))
-        if pd.notna(entraram) and pd.notna(sairam):
+        if pd.isna(entraram) or pd.isna(sairam):
+            st.caption("Sem dados de entradas e saídas.")
+        else:
             saldo = entraram - sairam
-            c3.metric("Saldo", f"{'+' if saldo > 0 else ''}{fmt_int(saldo)}",
-                      "cresceu" if saldo > 0 else "encolheu" if saldo < 0 else "estável",
-                      delta_color="green" if saldo > 0 else "red" if saldo < 0 else "off", delta_arrow="off")  # fmt: skip
+            base = c.clientes_brasil if pd.notna(c.clientes_brasil) and c.clientes_brasil else 0
+            estavel = base and abs(saldo) < 0.01 * base  # menos de 1% da carteira
+            a, b, d = st.columns(3)
+            a.metric("Entraram", f"+{fmt_int(entraram)}", "novos clientes", delta_color="green", delta_arrow="up")
+            b.metric("Saíram", f"−{fmt_int(sairam)}", "cancelaram", delta_color="red", delta_arrow="down")
+            sinal = "+" if saldo > 0 else "−" if saldo < 0 else ""
+            if estavel:
+                leitura, cor, seta = "ficou estável", "yellow", "off"
+            elif saldo > 0:
+                leitura, cor, seta = "cresceu", "green", "up"
+            else:
+                leitura, cor, seta = "encolheu", "red", "down"
+            d.metric("Resultado", f"{sinal}{fmt_int(abs(saldo))}", leitura, delta_color=cor, delta_arrow=seta,
+                     help="Entradas menos saídas. Variação menor que 1% da carteira conta como estável.")  # fmt: skip
+            if evo["transferencia_12m"]:
+                quando = fmt_mes(evo["transferencia_12m"]["competencia"])
+                st.caption(f"Sem contar a transferência de clientes entre empresas do grupo em {quando}.")
 
-    with direita:
-        st.markdown("**Do que os clientes mais reclamam** · últimos 12 meses")
-        assuntos = dados["assuntos"]
-        if assuntos.empty:
+    # --- tipo de contratação -----------------------------------------------------------------
+    with contratos, _quadro("Como os clientes contrataram", chave="resumo-baixo-2"):
+        contr = evo["contratacao"]
+        total = contr["clientes"].sum()
+        fatias = [linha for linha in contr.itertuples() if total and linha.clientes / total >= 0.01]  # esconde < 1%
+        if not fatias:
+            st.caption("Sem dados de contratação.")
+        else:
+            for col, linha in zip(st.columns(len(fatias)), fatias, strict=True):
+                curto, explica = CONTRATACAO_CURTO.get(linha.contratacao, (linha.contratacao, None))
+                col.metric(curto, f"{fmt_dec(100 * linha.clientes / total, 0)}%",
+                           help=f"{linha.contratacao} ({explica}): {fmt_int(linha.clientes)} clientes.")  # fmt: skip
+            st.caption("No plano individual o reajuste anual é limitado pela ANS; nos de empresa e adesão, "
+                       "é negociado com a operadora.")  # fmt: skip
+
+    # --- assuntos ------------------------------------------------------------------------------
+    assuntos = dados["assuntos"]
+    total = assuntos["reclamacoes"].sum() if not assuntos.empty else 0
+    subtitulo = f"{fmt_int(total)} no último ano" if total else "último ano"
+    with queixas, _quadro("Motivos de reclamação", subtitulo, chave="resumo-baixo-3"):
+        if not total:
             st.caption("Nenhuma reclamação registrada na ANS no último ano.")
         else:
-            linhas = "\n".join(f"| {_md(a.assunto)} | {fmt_int(a.reclamacoes)} |" for a in assuntos.itertuples())
-            st.markdown(f"| Assunto | Reclamações |\n|---|---:|\n{linhas}")
+            por_tema = (
+                assuntos.assign(tema=assuntos["assunto"].map(lambda a: ASSUNTOS.get(a, a)))
+                .groupby("tema", as_index=False)["reclamacoes"]
+                .sum()
+                .sort_values("reclamacoes", ascending=False)
+                .head(ASSUNTOS_NA_FICHA)
+            )
+            st.html(_ranking(por_tema, total))
+            st.caption(_frase_reclamacoes(por_tema.iloc[0], total))
 
 
-def _aba_evolucao(evo: dict) -> None:
-    st.markdown("**Clientes mês a mês**")
-    if evo["clientes"].empty:
-        st.caption("Sem histórico de clientes.")
-    else:
-        st.altair_chart(charts.linha(evo["clientes"], fmt_int, altura=220), width="stretch")
-        primeiro, ultimo = evo["clientes"].iloc[0], evo["clientes"].iloc[-1]
-        st.caption(f"De {fmt_mes(primeiro.competencia)} a {fmt_mes(ultimo.competencia)}: "
-                   f"{fmt_int(primeiro.valor)} → {fmt_int(ultimo.valor)} clientes")  # fmt: skip
-    st.markdown("**Reclamações mês a mês** · últimos 24 meses")
-    if evo["reclamacoes"].empty:
-        st.caption("Nenhuma reclamação registrada na ANS nesse período.")
-    else:
-        st.altair_chart(charts.colunas(evo["reclamacoes"], "competencia", fmt_int, altura=200), width="stretch")
+def _ranking(por_tema: pd.DataFrame, total) -> str:
+    """Lista numerada: posição, motivo e, à direita, quantidade e fatia do total."""
+    linhas = "".join(
+        f'<li><span class="pos">{i}</span><span class="tema">{escape(t.tema)}</span>'
+        f'<span class="qtd"><b>{fmt_int(t.reclamacoes)}</b> · {fmt_dec(100 * t.reclamacoes / total, 0)}%</span></li>'
+        for i, t in enumerate(por_tema.itertuples(), 1)
+    )
+    return f"<ol class='ranking'>{linhas}</ol>"
+
+
+def _frase_reclamacoes(maior, total) -> str:
+    """Resumo em linguagem simples do motivo mais comum ("1 em cada 4 reclamações...")."""
+    fatia = maior.reclamacoes / total
+    tema = maior.tema[0].lower() + maior.tema[1:]
+    if fatia >= 0.9:
+        return f"Quase todas as reclamações são sobre {_md(tema)}."
+    if fatia >= 0.5:
+        return f"Mais da metade das reclamações é sobre {_md(tema)}."
+    return f"1 em cada {round(1 / fatia)} reclamações é sobre {_md(tema)}."
+
+
+ANOS_NO_GRAFICO = 6
+
+
+def _por_ano(serie: pd.DataFrame, subir_e_bom: bool, ajustes: dict | None = None) -> None:
+    """Variação de cada ano contra o anterior, lado a lado ("2023 ▲ 4%").
+
+    `ajustes` desconta da variação o que não é real (ex.: transferência de carteira) por ano.
+    """
+    itens = []
+    for antes, depois in zip(serie.itertuples(), serie.iloc[1:].itertuples(), strict=False):
+        if not antes.valor:
+            continue
+        pct = 100 * (depois.valor - (ajustes or {}).get(depois.ano, 0) - antes.valor) / antes.valor
+        ano = f"{depois.ano}\\*" if pd.Timestamp(depois.ate).month < 12 else str(depois.ano)
+        casas = 0 if abs(pct) >= 10 else 1
+        if round(pct, casas) == 0:
+            selo = ":gray-badge[= 0%]"
+        else:
+            cor = "green" if (pct > 0) == subir_e_bom else "red"
+            selo = f":{cor}-badge[{'▲' if pct > 0 else '▼'} {fmt_dec(abs(pct), casas)}%]"
+        itens.append((ano, selo))
+    if not itens:
+        return
+    for col, (ano, selo) in zip(st.columns(len(itens[-5:]), gap="xxsmall"), itens[-5:], strict=True):
+        col.markdown(f"**{ano}**  \n{selo}", text_alignment="center")
+
+
+def _nota_parcial(serie: pd.DataFrame) -> str:
+    ate = pd.Timestamp(serie.iloc[-1].ate)
+    return f" · \\*{ate.year} até {fmt_mes(ate).split('/')[0]}, contra dez/{ate.year - 1}" if ate.month < 12 else ""
+
+
+def _historico_clientes(evo: dict) -> None:
+    serie = evo["clientes_tri"]
+    if len(serie) < 4 or not serie["valor"].any():
+        st.caption("Ainda não há histórico suficiente.")
+        return
+    st.altair_chart(charts.linha(serie, fmt_int, altura=150, trimestral=True), width="stretch")
+    ajustes = {}
+    for salto in evo["saltos"]:
+        ano = pd.Timestamp(salto["competencia"]).year
+        ajustes[ano] = ajustes.get(ano, 0) + salto["variacao"]
+    _por_ano(evo["clientes_ano"], subir_e_bom=True, ajustes=ajustes)
+    texto = "Crescimento de clientes a cada ano (fim de ano contra fim do ano anterior)" + _nota_parcial(
+        evo["clientes_ano"]
+    )
+    if evo["saltos"]:
+        # a transferência de carteira não é crescimento real: fica fora da % e é explicada
+        salto = evo["saltos"][-1]
+        outra = (salto["contraparte"] or "").rstrip(".")
+        de = f" {'vindos da' if salto['variacao'] > 0 else 'passados para a'} {_md(outra)}" if outra else ""
+        sinal = "+" if salto["variacao"] > 0 else "−"
+        texto += (f"  \nSem contar a transferência de {sinal}{fmt_compact(abs(salto['variacao']))} clientes{de} "
+                  f"em {fmt_mes(salto['competencia'])}.")  # fmt: skip
+    st.caption(texto)
+
+
+def _historico_qualidade(c, evo: dict) -> None:
+    if evo["idss"].empty:
+        st.caption("A ANS não publicou nota para esta operadora.")
+        return
+    notas = evo["idss"].tail(ANOS_NO_GRAFICO).assign(valor=lambda d: d["valor"] * 10)
+    st.altair_chart(charts.colunas(notas, "ano", _nota_texto, rotulo_x=str, altura=170, valores=True), width="stretch")
+    if evo["partes_idss"]:
+        linhas = []
+        for sigla, nome in PARTES_IDSS.items():
+            nota = evo["partes_idss"].get(sigla)
+            if nota is not None:
+                _, cor = qualidade(nota) or ("", None)
+                linhas.append(f"{SEMAFORO[cor]} {nome}: **{_nota10(nota)}**")
+        st.caption(f"Nota de 0 a 10 · por tema em {int(c.idss_ano)}:")
+        st.markdown("  \n".join(linhas))
+
+
+def _nota_texto(v) -> str:
+    return fmt_dec(v, 1).removesuffix(",0")
+
+
+def _historico_reclamacoes(evo: dict, mediana) -> None:
+    serie = evo["igr_tri"]
+    if len(serie) < 2:
+        st.caption("A ANS não publicou índice de reclamações para esta operadora.")
+        return
+    st.altair_chart(charts.linha(serie, lambda v: fmt_dec(v, 1), altura=150, trimestral=True), width="stretch")
+    _por_ano(evo["igr_ano"], subir_e_bom=False)
+    atual = serie.iloc[-1]
+    st.caption(f"Variação do índice médio de cada ano · verde = menos reclamações{_nota_parcial(evo['igr_ano'])}  \n"
+               f"Último trimestre: **{fmt_dec(atual.valor, 1)}** · média do mercado: {fmt_dec(mediana, 1)} "
+               "(reclamações a cada 100 mil clientes)")  # fmt: skip
+
+
+def _aba_historico(c, dados: dict, evo: dict) -> None:
+    clientes, notas, queixas = st.columns(3)
+    with clientes, _quadro("Evolução dos clientes"):
+        _historico_clientes(evo)
+    with notas, _quadro("Nota de qualidade por ano"):
+        _historico_qualidade(c, evo)
+    with queixas, _quadro("Evolução das reclamações"):
+        _historico_reclamacoes(evo, dados["mediana_igr"])
 
 
 def _aba_contato(reg: str, c) -> None:
     esquerda, direita = st.columns(2)
-    with esquerda:
-        st.markdown("**Contato**")
+    with esquerda, _quadro("Contato"):
         contato = _lista([("Telefone", _telefone(c)), ("E-mail", _texto(c.email)), ("Endereço", _endereco(c))])
         st.markdown(contato or "Sem contato cadastrado.")
-    with direita:
-        st.markdown("**Dados cadastrais**")
+    with direita, _quadro("Dados cadastrais"):
         ano = str(c.data_registro_ans.year) if pd.notna(c.data_registro_ans) else None
         st.markdown(_lista([("CNPJ", _cnpj(c.cnpj)), ("Registro na ANS", reg), ("Na ANS desde", ano)]))
     st.caption("Fonte: cadastro de operadoras da ANS. Telefone e e-mail são os informados pela operadora à ANS.")
 
 
-@st.dialog("Sobre a operadora", width="large")
-def abrir_ficha(reg: str) -> None:
+def _conteudo_ficha(reg: str) -> None:
     dados = ficha(reg)
     c = dados["cadastro"]
     evo = evolucao_operadora(reg, _texto(c.igr_cobertura))
+    with st.container(key="ficha"):
+        descricao = MODALIDADES.get(c.modalidade, c.modalidade)
+        st.caption(_md(" · ".join(x for x in [descricao, _texto(c.razao_social)] if x)))
+        resumo, historico, contato = st.tabs(["Resumo", "Histórico", "Contato"])
+        with resumo:
+            _aba_resumo(c, dados, evo)
+        with historico:
+            _aba_historico(c, dados, evo)
+        with contato:
+            _aba_contato(reg, c)
 
-    st.subheader(_md(c.nome), anchor=False)
-    descricao = MODALIDADES.get(c.modalidade, c.modalidade)
-    st.caption(_md(" · ".join(x for x in [descricao, _texto(c.razao_social)] if x)))
 
-    resumo, evolucao, contato = st.tabs(["Resumo", "Evolução", "Contato"])
-    with resumo:
-        _aba_resumo(c, dados, evo)
-    with evolucao:
-        _aba_evolucao(evo)
-    with contato:
-        _aba_contato(reg, c)
+def abrir_ficha(reg: str) -> None:
+    """Abre a janela com o nome da operadora no título."""
+    nome = ficha(reg)["cadastro"].nome
+    st.dialog(nome, width="large")(_conteudo_ficha)(reg)

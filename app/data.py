@@ -101,9 +101,12 @@ _SEDES = """
     WHERE p.situacao = 'ativa' AND p.beneficiarios > 0
 """
 
-# referência do IGR: mediana das operadoras com 10 mil+ clientes, por tipo de cobertura
+# referência do IGR por tipo de cobertura, entre operadoras com 10 mil+ clientes: a mediana; quando ela é zero
+# (nas odontológicas a maioria tem IGR 0), a média, para ainda haver com o que comparar
 _MEDIANAS_IGR = """
-    SELECT igr_cobertura, median(igr) AS mediana_igr FROM painel_operadora
+    SELECT igr_cobertura,
+           CASE WHEN median(igr) > 0 THEN median(igr) ELSE avg(igr) END AS mediana_igr
+    FROM painel_operadora
     WHERE beneficiarios >= 10000 AND igr IS NOT NULL GROUP BY igr_cobertura
 """
 
@@ -136,7 +139,8 @@ def ficha(reg: str) -> dict:
     """Tudo o que o cartão da operadora mostra."""
     db = get_db()
     cadastro = db.q(
-        """SELECT d.*, p.beneficiarios AS clientes_brasil, p.ufs_atuacao, p.igr, p.igr_cobertura, p.idss, p.idss_ano
+        """SELECT d.*, p.beneficiarios AS clientes_brasil, p.ufs_atuacao, p.igr, p.igr_cobertura, p.idss, p.idss_ano,
+                  p.pct_resolvidas, p.nip_resolvidas_12m, p.nip_avaliadas_12m
            FROM dim_operadora d LEFT JOIN painel_operadora p USING (registro_ans)
            WHERE d.registro_ans = $reg""",
         reg=reg,
@@ -148,7 +152,7 @@ def ficha(reg: str) -> dict:
         """SELECT assunto, sum(demandas) AS reclamacoes FROM nip_mensal
            WHERE registro_ans = $reg
              AND competencia > (SELECT max(competencia) FROM beneficiarios_mensal) - INTERVAL 12 MONTH
-           GROUP BY assunto ORDER BY reclamacoes DESC LIMIT 5""",
+           GROUP BY assunto ORDER BY reclamacoes DESC""",
         reg=reg,
     )
     return {"cadastro": cadastro, "mediana_igr": mediana_igr, "assuntos": assuntos}
@@ -159,35 +163,61 @@ def evolucao_operadora(reg: str, cobertura_igr: str | None) -> dict:
     """Séries e resumos que a ficha mostra além da foto atual (sempre pela chave da operadora)."""
     db = get_db()
     ref = "(SELECT max(competencia) FROM beneficiarios_mensal)"
-    clientes = db.q(
-        "SELECT competencia, sum(beneficiarios) AS valor FROM beneficiarios_mensal "
-        "WHERE registro_ans = $reg GROUP BY competencia ORDER BY competencia",
-        reg=reg,
-    )
+    saltos = _saltos(reg)
+    # meses de transferência de carteira ficam fora: a ANS conta os clientes transferidos como "entradas"
+    meses_transferencia = [pd.Timestamp(x["competencia"]).date() for x in saltos] or [pd.Timestamp("1900-01-01").date()]
     fluxo = db.q(
         f"""SELECT sum(aderidos) AS entraram, sum(cancelados) AS sairam FROM beneficiarios_mensal
-            WHERE registro_ans = $reg AND competencia > {ref} - INTERVAL 12 MONTH AND competencia <= {ref}""",
+            WHERE registro_ans = $reg AND competencia > {ref} - INTERVAL 12 MONTH AND competencia <= {ref}
+              AND NOT list_contains($fora, competencia)""",
+        reg=reg, fora=meses_transferencia,
+    ).iloc[0]  # fmt: skip
+    transferencia_12m = next(
+        (
+            x
+            for x in reversed(saltos)
+            if pd.Timestamp(x["competencia"]) > pd.Timestamp(db.ref) - pd.DateOffset(months=12)
+        ),
+        None,
+    )
+    # séries por trimestre (menos oscilação que o mês a mês): clientes no fim do trimestre, IGR médio
+    clientes_tri = db.q(
+        """SELECT date_trunc('quarter', competencia) AS competencia, arg_max(valor, mes) AS valor, max(mes) AS ate
+           FROM (SELECT competencia AS mes, competencia, sum(beneficiarios) AS valor FROM beneficiarios_mensal
+                 WHERE registro_ans = $reg GROUP BY competencia)
+           GROUP BY 1 ORDER BY 1""",
         reg=reg,
-    ).iloc[0]
+    )
+    igr_tri = db.q(
+        """SELECT date_trunc('quarter', competencia) AS competencia, avg(igr) AS valor, max(competencia) AS ate
+           FROM igr_mensal
+           WHERE registro_ans = $reg AND cobertura = $cob AND igr IS NOT NULL
+             AND competencia >= (SELECT min(competencia) FROM beneficiarios_mensal)
+           GROUP BY 1 ORDER BY 1""",
+        reg=reg, cob=cobertura_igr,
+    )  # fmt: skip
+    # por ano: clientes no último mês de cada ano e IGR médio do ano
+    clientes_ano = db.q(
+        """SELECT year(competencia) AS ano, arg_max(valor, competencia) AS valor, max(competencia) AS ate
+           FROM (SELECT competencia, sum(beneficiarios) AS valor FROM beneficiarios_mensal
+                 WHERE registro_ans = $reg GROUP BY competencia)
+           GROUP BY 1 ORDER BY 1""",
+        reg=reg,
+    )
+    igr_ano = db.q(
+        """SELECT year(competencia) AS ano, avg(igr) AS valor, max(competencia) AS ate
+           FROM igr_mensal
+           WHERE registro_ans = $reg AND cobertura = $cob AND igr IS NOT NULL
+             AND competencia >= (SELECT min(competencia) FROM beneficiarios_mensal)
+           GROUP BY 1 ORDER BY 1""",
+        reg=reg, cob=cobertura_igr,
+    )  # fmt: skip
     contratacao = db.q(
         f"""SELECT contratacao, sum(beneficiarios) AS clientes FROM beneficiarios_mensal
             WHERE registro_ans = $reg AND competencia = {ref}
             GROUP BY contratacao HAVING sum(beneficiarios) > 0 ORDER BY clientes DESC""",
         reg=reg,
     )
-    reclamacoes = db.q(
-        f"""SELECT competencia, sum(demandas) AS valor FROM nip_mensal
-            WHERE registro_ans = $reg AND competencia > {ref} - INTERVAL 24 MONTH AND competencia <= {ref}
-            GROUP BY competencia ORDER BY competencia""",
-        reg=reg,
-    )
-    igr = db.q(
-        """SELECT competencia, igr AS valor FROM igr_mensal
-           WHERE registro_ans = $reg AND cobertura = $cob AND igr IS NOT NULL
-             AND competencia > (SELECT max(competencia) FROM igr_mensal) - INTERVAL 36 MONTH
-           ORDER BY competencia""",
-        reg=reg, cob=cobertura_igr,
-    )  # fmt: skip
     idss = db.q(
         "SELECT ano_avaliacao AS ano, valor FROM idss_indicadores "
         "WHERE registro_ans = $reg AND indicador = 'IDSS' ORDER BY ano_avaliacao",
@@ -200,12 +230,54 @@ def evolucao_operadora(reg: str, cobertura_igr: str | None) -> dict:
         reg=reg,
     )
     return {
-        "clientes": clientes,
+        "clientes_tri": clientes_tri,
+        "igr_tri": igr_tri,
+        "clientes_ano": clientes_ano,
+        "igr_ano": igr_ano,
+        "transferencia_12m": transferencia_12m,
+        "saltos": saltos,
         "entraram": fluxo.entraram,
         "sairam": fluxo.sairam,
         "contratacao": contratacao,
-        "reclamacoes": reclamacoes,
-        "igr": igr,
         "idss": idss,
         "partes_idss": dict(zip(partes_idss["indicador"], partes_idss["valor"], strict=True)),
     }
+
+
+SALTO_MINIMO = 5000  # clientes
+
+
+@st.cache_data(ttl="1h")
+def _saltos(reg: str) -> list[dict]:
+    """Mudanças bruscas de carteira num único mês (normalmente transferência entre empresas do mesmo grupo).
+
+    Considera salto uma variação de pelo menos 5 mil clientes e 30% do maior valor entre antes e depois
+    (ex.: dobrar de tamanho ou perder quase tudo num mês). Quando outra operadora
+    teve a variação oposta no mesmo mês, ela é apontada como origem/destino.
+    """
+    return get_db().q(
+        """
+        WITH mensal AS (
+            SELECT registro_ans, competencia, sum(beneficiarios) AS v
+            FROM beneficiarios_mensal GROUP BY ALL
+        ),
+        dif AS (
+            SELECT registro_ans, competencia, v,
+                   lag(v) OVER (PARTITION BY registro_ans ORDER BY competencia) AS antes
+            FROM mensal
+        ),
+        saltos AS (
+            SELECT *, v - antes AS variacao FROM dif
+            WHERE antes IS NOT NULL AND abs(v - antes) >= $minimo AND abs(v - antes) >= 0.3 * greatest(antes, v)
+        )
+        SELECT s.competencia, s.antes, s.v AS depois, s.variacao,
+               (SELECT p.nome FROM saltos o JOIN painel_operadora p USING (registro_ans)
+                WHERE o.competencia = s.competencia AND o.registro_ans <> s.registro_ans
+                  AND sign(o.variacao) = -sign(s.variacao) AND abs(o.variacao) >= 0.5 * abs(s.variacao)
+                ORDER BY abs(abs(o.variacao) - abs(s.variacao)) LIMIT 1) AS contraparte
+        FROM saltos s
+        WHERE s.registro_ans = $reg
+        ORDER BY s.competencia
+        """,
+        reg=reg, minimo=SALTO_MINIMO,
+    ).to_dict("records")  # fmt: skip
