@@ -122,3 +122,19 @@ def test_idss_unpivot(env):
     ).fetchall()
     # "ND" é descartado
     assert rows == [("IDQS", 2025, 2024, 0.5), ("IDSS", 2024, 2023, 0.7), ("IDSS", 2025, 2024, 0.8123)]
+
+
+def test_cadastro_com_varios_snapshots(env):
+    """Duas fotos diárias do cadastro não podem duplicar operadoras nem sumir com as canceladas."""
+    settings, lake = env
+    for t in TASKS:
+        pipeline.run_task(settings, lake, t)
+    for t in TASKS[:2]:  # mesma foto em outro dia
+        dia = {**t.params, "snapshot": "2026-09-17"}
+        pipeline.run_task(settings, lake, Task(t.source, f"{dia['situacao']}/2026-09-17", t.url, "v2", dia))
+    gold.build(settings, lake, force=True)
+    rel = duckdb.sql(
+        f"SELECT situacao, count(*), count(DISTINCT registro_ans) FROM '{lake.uri('gold/dim_operadora/data.parquet')}' "
+        "GROUP BY 1 ORDER BY 1"
+    )
+    assert rel.fetchall() == [("ativa", 2, 2), ("cancelada", 1, 1)]

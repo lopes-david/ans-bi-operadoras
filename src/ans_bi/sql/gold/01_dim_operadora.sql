@@ -1,12 +1,15 @@
 -- Dimensão de operadoras: último snapshot de ativas + canceladas (ativa tem prioridade).
-WITH ultimo AS (
-    SELECT situacao, max(snapshot) AS snapshot FROM operadoras GROUP BY situacao
+-- Usa janela em vez de JOIN com as colunas de partição: no DuckDB 1.5.5 o JOIN
+-- (situacao, snapshot) gerava linhas duplicadas e descartava as canceladas ao materializar.
+WITH com_ultimo AS (
+    SELECT *, max(snapshot) OVER (PARTITION BY situacao) AS ultimo_snapshot
+    FROM operadoras
 ),
 cadastro AS (
-    SELECT o.*,
-           row_number() OVER (PARTITION BY registro_ans ORDER BY (o.situacao = 'ativa') DESC) AS rn
-    FROM operadoras o
-    JOIN ultimo u USING (situacao, snapshot)
+    SELECT *,
+           row_number() OVER (PARTITION BY registro_ans ORDER BY (situacao = 'ativa') DESC) AS rn
+    FROM com_ultimo
+    WHERE snapshot = ultimo_snapshot
 )
 SELECT
     registro_ans,

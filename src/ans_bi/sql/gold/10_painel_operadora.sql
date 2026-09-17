@@ -29,6 +29,16 @@ igr_atual AS (
     FROM igr_mensal
     GROUP BY registro_ans
 ),
+-- reclamações resolvidas na mediação da ANS (NIP classificada como INATIVA ou RVE) sobre as encerradas
+-- com resultado (inclui NÚCLEO, que virou processo); em andamento, não procedentes e fora de competência ficam fora
+resolucao AS (
+    SELECT registro_ans,
+           count(*) FILTER (WHERE classificacao_nip IN ('INATIVA', 'RVE'))           AS nip_resolvidas_12m,
+           count(*) FILTER (WHERE classificacao_nip IN ('INATIVA', 'RVE', 'NÚCLEO')) AS nip_avaliadas_12m
+    FROM nip, ref
+    WHERE competencia > ref.c - INTERVAL 12 MONTH AND competencia <= ref.c
+    GROUP BY registro_ans
+),
 idss_atual AS (
     SELECT registro_ans, arg_max(valor, ano_avaliacao) AS idss, max(ano_avaliacao) AS idss_ano
     FROM idss_indicadores
@@ -63,10 +73,14 @@ SELECT
     END                                                     AS porte,
     i.igr_competencia,
     s.idss,
-    s.idss_ano
+    s.idss_ano,
+    coalesce(r.nip_resolvidas_12m, 0)                        AS nip_resolvidas_12m,
+    coalesce(r.nip_avaliadas_12m, 0)                         AS nip_avaliadas_12m,
+    round(100.0 * r.nip_resolvidas_12m / nullif(r.nip_avaliadas_12m, 0), 1) AS pct_resolvidas
 FROM dim_operadora d
 FULL JOIN ben b USING (registro_ans)
 LEFT JOIN nip12 n ON n.registro_ans = coalesce(d.registro_ans, b.registro_ans)
 LEFT JOIN igr_atual i ON i.registro_ans = coalesce(d.registro_ans, b.registro_ans)
 LEFT JOIN idss_atual s ON s.registro_ans = coalesce(d.registro_ans, b.registro_ans)
+LEFT JOIN resolucao r ON r.registro_ans = coalesce(d.registro_ans, b.registro_ans)
 WHERE d.situacao = 'ativa' OR coalesce(b.beneficiarios, 0) > 0
