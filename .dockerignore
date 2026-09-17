@@ -1,0 +1,10 @@
+.env
+.env.*
+.git
+.venv
+data
+build
+infra/cdk.out
+**/__pycache__
+.pytest_cache
+.ruff_cache

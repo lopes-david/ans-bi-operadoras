@@ -1,0 +1,50 @@
+[project]
+name = "ans-bi"
+version = "0.1.0"
+description = "Pipeline de dados abertos da ANS (operadoras de planos de saúde) em AWS de baixo custo"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "duckdb==1.5.5",
+]
+
+[project.scripts]
+ans-bi = "ans_bi.cli:main"
+
+[dependency-groups]
+app = [
+    "streamlit>=1.64.0",
+]
+dev = [
+    "boto3>=1.40",
+    "pytest>=8.3",
+    "ruff>=0.13",
+]
+infra = [
+    "aws-cdk-lib==2.269.0",
+    "constructs>=10.4,<11",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ans_bi"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+known-first-party = ["ans_bi", "charts", "classificacao", "componentes", "data", "ficha_operadora", "geo"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/**" = ["E501"]

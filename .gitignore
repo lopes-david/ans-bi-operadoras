@@ -1,0 +1,22 @@
+# segredos
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+
+# dados locais
+data/
+*.duckdb
+*.duckdb.wal
+
+# infra
+infra/cdk.out/
+.aws-sam/

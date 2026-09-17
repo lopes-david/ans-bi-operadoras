@@ -1,0 +1,22 @@
+# Auto-hospedagem (ex.: mini servidor): `docker compose up -d --build`
+# painel em http://<servidor>:8501; dados persistidos em ./data
+services:
+  app:
+    build: .
+    image: ans-bi
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  # verifica a ANS uma vez por dia e atualiza a gold que o painel lê
+  pipeline:
+    image: ans-bi
+    depends_on: [app]
+    volumes:
+      - ./data:/data
+    environment:
+      ANS_START_YEAR: ${ANS_START_YEAR:-2021}
+    command: ["sh", "-c", "while true; do ans-bi run -j 2; sleep 86400; done"]
+    restart: unless-stopped

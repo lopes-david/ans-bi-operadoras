@@ -1,0 +1,55 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DeployViaCdkBootstrapRoles",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "arn:aws:iam::*:role/cdk-hnb659fds-*"
+    },
+    {
+      "Sid": "ReadStack",
+      "Effect": "Allow",
+      "Action": ["cloudformation:DescribeStacks"],
+      "Resource": "arn:aws:cloudformation:*:*:stack/AnsBi/*"
+    },
+    {
+      "Sid": "OperatePipeline",
+      "Effect": "Allow",
+      "Action": ["lambda:InvokeFunction"],
+      "Resource": "arn:aws:lambda:*:*:function:AnsBi-*"
+    },
+    {
+      "Sid": "SeedLake",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket", "s3:GetObject", "s3:PutObject"],
+      "Resource": ["arn:aws:s3:::ansbi-lake*", "arn:aws:s3:::ansbi-lake*/*"]
+    },
+    {
+      "Sid": "Observe",
+      "Effect": "Allow",
+      "Action": [
+        "logs:StartLiveTail",
+        "logs:FilterLogEvents",
+        "logs:DescribeLogGroups",
+        "sqs:GetQueueAttributes"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "QueryWithAthena",
+      "Effect": "Allow",
+      "Action": [
+        "athena:StartQueryExecution",
+        "athena:GetQueryExecution",
+        "athena:GetQueryResults",
+        "athena:GetWorkGroup",
+        "glue:GetDatabase",
+        "glue:GetDatabases",
+        "glue:GetTable",
+        "glue:GetTables"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

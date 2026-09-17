@@ -1,0 +1,18 @@
+{
+  "app": "uv run --group infra python app.py",
+  "watch": { "include": ["**"] },
+  "context": {
+    "stackName": "AnsBi",
+    "scheduleCron": "cron(0 8 * * ? *)",
+    "scheduleTimezone": "America/Sao_Paulo",
+    "workerConcurrency": 3,
+    "workerMemoryMb": 2048,
+    "startYear": 2021,
+    "budgetUsd": 5,
+    "alertEmail": "",
+    "retainData": true,
+    "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
+    "@aws-cdk/aws-s3:createDefaultLoggingPolicy": true,
+    "@aws-cdk/core:enablePartitionLiterals": true
+  }
+}

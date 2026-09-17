@@ -1,0 +1,122 @@
+.mapa-root {
+  position: relative;
+  width: 100%;
+  font-family: var(--st-font, sans-serif);
+  color: var(--st-text-color);
+}
+.mapa-root svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: calc(100vh - 170px);
+  overflow: visible;
+}
+.estado {
+  stroke: var(--st-background-color, #fff);
+  stroke-width: 0.9;
+  stroke-linejoin: round;
+  cursor: pointer;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.45s cubic-bezier(0.2, 0.9, 0.25, 1.2), opacity 0.35s ease, fill 0.35s ease,
+    filter 0.35s ease;
+  animation: surgir 0.5s ease backwards;
+  outline: none;
+}
+.estado:hover,
+.estado:focus-visible {
+  transform: translateY(-2px) scale(1.03);
+  filter: brightness(1.12);
+}
+.mapa-root.com-selecao .estado:not(.selecionado) {
+  opacity: 0.35;
+}
+.estado.selecionado {
+  fill: var(--st-primary-color, #0e6f66) !important;
+  transform: scale(1.22);
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.28));
+  stroke-width: 1.4;
+  animation: destacar 0.5s ease;
+}
+.alvo-df {
+  fill: transparent;
+  cursor: pointer;
+}
+.rotulo {
+  pointer-events: none;
+  font-size: 13px;
+  font-weight: 700;
+  fill: #fff;
+  text-anchor: middle;
+  dominant-baseline: central;
+  opacity: 0;
+  transition: opacity 0.3s ease 0.2s;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.25);
+  stroke-width: 2px;
+}
+.rotulo.visivel {
+  opacity: 1;
+}
+.dica {
+  position: absolute;
+  pointer-events: none;
+  background: var(--st-background-color, #fff);
+  color: var(--st-text-color, #111);
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  line-height: 1.35;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.dica.visivel {
+  opacity: 1;
+  transform: translateY(0);
+}
+.dica b {
+  display: block;
+}
+.legenda {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  opacity: 0.75;
+  margin-top: 4px;
+}
+.legenda .barra {
+  width: 120px;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #cde2fb, #184f95);
+}
+@keyframes surgir {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+@keyframes destacar {
+  0% {
+    transform: scale(1);
+  }
+  60% {
+    transform: scale(1.28);
+  }
+  100% {
+    transform: scale(1.22);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .estado,
+  .rotulo,
+  .dica {
+    transition: none;
+    animation: none;
+  }
+}
