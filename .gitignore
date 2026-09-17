@@ -20,3 +20,9 @@ data/
 # infra
 infra/cdk.out/
 .aws-sam/
+
+# configurações locais do editor (caminhos absolutos)
+.vscode/
+
+# contexto para IAs/leitura local (não versionado)
+CONTEXTO.md

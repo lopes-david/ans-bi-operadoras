@@ -55,11 +55,11 @@ painel lateral lista as operadoras **com sede** ali, com o total de clientes de 
 Dá para filtrar pela cidade da sede e buscar pelo nome. O estado escolhido fica na URL
 (ex.: `/?uf=RS`), então o link pode ser compartilhado.
 
-Clicar numa operadora abre a **ficha**, escrita para quem não é da área:
-- clientes, sede, nota de qualidade "Qualidade (IDSS)" e índice de reclamações "Reclamações (IGR)",
-  com uma leitura em palavras ("Muito boa", "Menos que a média");
-- os assuntos mais reclamados nos últimos 12 meses;
-- contato (telefone, e-mail e endereço) e dados cadastrais (CNPJ, registro, ano de entrada na ANS).
+Clicar numa operadora abre a **ficha**, escrita para quem não é da área, em três abas:
+- **Resumo**: clientes, sede, "Qualidade (IDSS)" e "Reclamações (IGR)" com leitura em palavras
+  ("Muito boa", "Poucas reclamações") e semáforo 🟢🟡🔴, reclamações resolvidas e assuntos mais reclamados;
+- **Histórico**: clientes e reclamações por trimestre, nota de qualidade por ano;
+- **Contato**: telefone, e-mail, endereço e dados cadastrais (CNPJ, registro, ano de entrada na ANS).
 
 O mapa é um componente próprio (`app/componentes/`): SVG com animação em CSS, desenhado a partir da
 malha oficial de estados do IBGE (`app/assets/br_uf.json`), sem bibliotecas externas.
@@ -91,6 +91,34 @@ make app                        # painel em http://localhost:8501
 desde `ANS_START_YEAR` (padrão 2021; ~10 GB de download, de 20 a 30 min numa conexão boa).
 Os dados ficam em `data/lake/`. Para outras opções, rode `uv run ans-bi --help` e veja o [.env.example](.env.example).
 
+### Consultar com SQL (SQLTools, DBeaver, CLI do DuckDB)
+
+`make banco` gera `data/ans_bi.duckdb`: um arquivo pequeno, só com views sobre o lake, organizadas nos
+esquemas `gold` (tabelas prontas para análise) e `silver` (dados tratados linha a linha), com descrição
+de tabelas e colunas. Rode de novo depois de cada atualização dos dados.
+
+No VS Code, instale o SQLTools e o driver `Evidence.sqltools-duckdb-driver` e crie uma conexão DuckDB
+apontando para `data/ans_bi.duckdb` em modo *Read Only* (feche a conexão antes de rodar `make banco`).
+Consultas de exemplo em [sql/exemplos/consultas.sql](sql/exemplos/consultas.sql).
+
+A pasta `.vscode/` não vai para o git (o caminho do banco é absoluto). Para configurar, crie
+`.vscode/settings.json` com o caminho da sua cópia do projeto:
+
+```json
+{
+  "sqltools.connections": [
+    {
+      "name": "ANS BI (DuckDB)",
+      "driver": "DuckDB",
+      "databaseFilePath": "/caminho/para/ans-bi-operadoras/data/ans_bi.duckdb",
+      "accessMode": "Read Only",
+      "previewLimit": 100
+    }
+  ],
+  "sqltools.useNodeRuntime": true
+}
+```
+
 ## Servidor próprio (Docker)
 
 ```bash
@@ -121,10 +149,15 @@ src/ans_bi/          pipeline (Python + DuckDB)
   sources.py         catálogo de fontes: descoberta e partições
   pipeline.py        planner/worker
   gold.py            marts + manifest do site
+  banco.py           banco DuckDB de views para consulta (make banco)
   catalog.py         registro no Glue (partition projection, sem crawler)
   handlers.py        entradas das Lambdas
   sql/silver, sql/gold
-app/                 painel Streamlit (views/ = páginas)
+app/                 painel Streamlit
+  streamlit_app.py   mapa + lista de operadoras
+  ficha_operadora.py ficha em abas
+  componentes/       mapa do Brasil em SVG (componente próprio)
+sql/exemplos/        consultas SQL de exemplo
 infra/               AWS CDK (Python)
 scripts/             empacotamento da Lambda
 tests/               testes sem rede, com fixtures sintéticas

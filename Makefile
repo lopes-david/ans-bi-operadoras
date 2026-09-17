@@ -9,7 +9,7 @@ CDK          := cd infra && JSII_SILENCE_WARNING_DEPRECATED_NODE_VERSION=1 npx -
 output        = $$(aws cloudformation describe-stacks --stack-name $(STACK) --region $(REGION) \
                   --query "Stacks[0].Outputs[?OutputKey=='$(1)'].OutputValue" --output text)
 
-.PHONY: help setup lint fmt test run backfill gold app docker-up docker-down build synth bootstrap deploy diff destroy \
+.PHONY: help setup lint fmt test run backfill gold banco app docker-up docker-down build synth bootstrap deploy diff destroy \
         seed invoke-planner invoke-backfill invoke-gold logs dlq outputs clean
 
 help: ## lista os comandos
@@ -36,6 +36,9 @@ backfill: ## processa localmente todo o histórico desde ANS_START_YEAR (demorad
 
 gold: ## reconstrói a camada gold
 	uv run ans-bi gold --force
+
+banco: ## gera data/ans_bi.duckdb (views gold/silver) para explorar no SQLTools/DBeaver
+	uv run ans-bi banco
 
 app: ## abre o painel em http://localhost:8501 usando o lake local
 	uv run --group app streamlit run app/streamlit_app.py

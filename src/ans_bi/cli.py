@@ -52,6 +52,8 @@ def main(argv: list[str] | None = None) -> None:
             p.add_argument("-j", "--jobs", type=int, default=2, help="arquivos em paralelo (padrão 2)")
             p.add_argument("--no-gold", action="store_true", help="não reconstrói a gold ao final")
 
+    sub.add_parser("banco", help="gera data/ans_bi.duckdb com views organizadas (para SQLTools/DBeaver)")
+
     g = sub.add_parser("gold", help="reconstrói a camada gold e o manifest do site")
     g.add_argument("--force", action="store_true")
 
@@ -71,6 +73,12 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "sources":
         for s in SOURCES.values():
             print(f"{s.name:18} {s.description}")
+        return
+
+    if args.cmd == "banco":
+        from . import banco
+
+        print(json.dumps(banco.construir(settings), indent=1))
         return
 
     if args.cmd == "gold":
