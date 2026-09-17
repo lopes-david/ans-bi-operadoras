@@ -11,7 +11,7 @@ import pandas as pd
 import streamlit as st
 
 import charts
-from classificacao import MINIMO_RESOLUCAO, RECLAMACOES_CURTO, SEMAFORO, qualidade, reclamacoes, resolucao
+from classificacao import MINIMO_RESOLUCAO, RECLAMACOES_CURTO, qualidade, reclamacoes, resolucao
 from data import UF_NOMES, evolucao_operadora, ficha, fmt_compact, fmt_dec, fmt_int, fmt_mes
 
 MODALIDADES = {
@@ -60,11 +60,14 @@ ASSUNTOS = {
     "Demitidos, Exonerados e Aposentados": "Plano após demissão ou aposentadoria",
 }
 ASSUNTOS_NA_FICHA = 5
-PARTES_IDSS = {
-    "IDQS": "Qualidade do atendimento",
-    "IDGA": "Acesso à rede (consultas, exames)",
-    "IDSM": "Saúde financeira",
-    "IDGR": "Gestão e cumprimento de regras",
+# temas do IDSS: rótulo curto (botão), cor da linha e o que significa, em linguagem simples
+GERAL = "Nota geral"
+TEMAS_IDSS = {
+    GERAL: ("IDSS", "#3987e5", "Nota final da ANS, que resume os quatro temas abaixo."),
+    "Atendimento": ("IDQS", "#d95926", "Qualidade do atendimento: exames, partos, internações e prevenção."),
+    "Acesso à rede": ("IDGA", "#199e70", "Facilidade de conseguir consulta, exame e cirurgia na rede do plano."),
+    "Saúde financeira": ("IDSM", "#c98500", "Se a operadora tem dinheiro em caixa para honrar os atendimentos."),
+    "Regras": ("IDGR", "#d55181", "Se a operadora cumpre as regras da ANS e responde aos clientes."),
 }
 
 
@@ -265,11 +268,13 @@ def _frase_reclamacoes(maior, total) -> str:
 
 
 ANOS_NO_GRAFICO = 6
+ANOS_NA_VARIACAO = 5
 
 
 def _por_ano(serie: pd.DataFrame, subir_e_bom: bool, ajustes: dict | None = None) -> None:
-    """Variação de cada ano contra o anterior, lado a lado ("2023 ▲ 4%").
+    """Variação de cada ano contra o anterior, lado a lado ("2023 ▲ 42%").
 
+    O que a seta significa fica na legenda do quadro, uma vez só, para não repetir em cada ano.
     `ajustes` desconta da variação o que não é real (ex.: transferência de carteira) por ano.
     """
     itens = []
@@ -280,20 +285,20 @@ def _por_ano(serie: pd.DataFrame, subir_e_bom: bool, ajustes: dict | None = None
         ano = f"{depois.ano}\\*" if pd.Timestamp(depois.ate).month < 12 else str(depois.ano)
         casas = 0 if abs(pct) >= 10 else 1
         if round(pct, casas) == 0:
-            selo = ":gray-badge[= 0%]"
+            selo = ":gray-badge[estável]"
         else:
             cor = "green" if (pct > 0) == subir_e_bom else "red"
             selo = f":{cor}-badge[{'▲' if pct > 0 else '▼'} {fmt_dec(abs(pct), casas)}%]"
         itens.append((ano, selo))
-    if not itens:
-        return
-    for col, (ano, selo) in zip(st.columns(len(itens[-5:]), gap="xxsmall"), itens[-5:], strict=True):
-        col.markdown(f"**{ano}**  \n{selo}", text_alignment="center")
+    itens = itens[-ANOS_NA_VARIACAO:]
+    if itens:
+        for col, (ano, selo) in zip(st.columns(len(itens), gap="xxsmall"), itens, strict=True):
+            col.markdown(f"**{ano}**  \n{selo}", text_alignment="center")
 
 
 def _nota_parcial(serie: pd.DataFrame) -> str:
     ate = pd.Timestamp(serie.iloc[-1].ate)
-    return f" · \\*{ate.year} até {fmt_mes(ate).split('/')[0]}, contra dez/{ate.year - 1}" if ate.month < 12 else ""
+    return f" · \\*{ate.year} até {fmt_mes(ate).split('/')[0]}" if ate.month < 12 else ""
 
 
 def _historico_clientes(evo: dict) -> None:
@@ -307,9 +312,7 @@ def _historico_clientes(evo: dict) -> None:
         ano = pd.Timestamp(salto["competencia"]).year
         ajustes[ano] = ajustes.get(ano, 0) + salto["variacao"]
     _por_ano(evo["clientes_ano"], subir_e_bom=True, ajustes=ajustes)
-    texto = "Crescimento de clientes a cada ano (fim de ano contra fim do ano anterior)" + _nota_parcial(
-        evo["clientes_ano"]
-    )
+    texto = "Ganhou ou perdeu clientes ▲▼ em relação ao ano anterior" + _nota_parcial(evo["clientes_ano"])
     if evo["saltos"]:
         # a transferência de carteira não é crescimento real: fica fora da % e é explicada
         salto = evo["saltos"][-1]
@@ -321,21 +324,23 @@ def _historico_clientes(evo: dict) -> None:
     st.caption(texto)
 
 
-def _historico_qualidade(c, evo: dict) -> None:
-    if evo["idss"].empty:
-        st.caption("A ANS não publicou nota para esta operadora.")
-        return
-    notas = evo["idss"].tail(ANOS_NO_GRAFICO).assign(valor=lambda d: d["valor"] * 10)
-    st.altair_chart(charts.colunas(notas, "ano", _nota_texto, rotulo_x=str, altura=170, valores=True), width="stretch")
-    if evo["partes_idss"]:
-        linhas = []
-        for sigla, nome in PARTES_IDSS.items():
-            nota = evo["partes_idss"].get(sigla)
-            if nota is not None:
-                _, cor = qualidade(nota) or ("", None)
-                linhas.append(f"{SEMAFORO[cor]} {nome}: **{_nota10(nota)}**")
-        st.caption(f"Nota de 0 a 10 · por tema em {int(c.idss_ano)}:")
-        st.markdown("  \n".join(linhas))
+def _historico_qualidade(c, evo: dict, reg: str) -> None:
+    """Colunas por ano da nota escolhida: a geral ou um dos quatro temas que a compõem."""
+    escolha = st.session_state.get(f"tema-{reg}") or GERAL
+    sigla, cor, explicacao = TEMAS_IDSS[escolha]
+    if sigla == "IDSS":
+        serie = evo["idss"]
+    else:
+        temas = evo["temas_idss"]
+        serie = temas[temas["indicador"] == sigla][["ano", "valor"]]
+    if serie.empty:
+        st.caption("A ANS não publicou essa nota para esta operadora.")
+    else:
+        notas = serie.tail(ANOS_NO_GRAFICO).assign(valor=lambda d: d["valor"] * 10)
+        st.altair_chart(charts.colunas(notas, "ano", _nota_texto, rotulo_x=str, altura=150, valores=True, cor=cor),
+                        width="stretch")  # fmt: skip
+    st.pills("Tema", list(TEMAS_IDSS), default=GERAL, key=f"tema-{reg}", label_visibility="collapsed")
+    st.caption(f"{explicacao} Nota de 0 a 10.")
 
 
 def _nota_texto(v) -> str:
@@ -350,17 +355,18 @@ def _historico_reclamacoes(evo: dict, mediana) -> None:
     st.altair_chart(charts.linha(serie, lambda v: fmt_dec(v, 1), altura=150, trimestral=True), width="stretch")
     _por_ano(evo["igr_ano"], subir_e_bom=False)
     atual = serie.iloc[-1]
-    st.caption(f"Variação do índice médio de cada ano · verde = menos reclamações{_nota_parcial(evo['igr_ano'])}  \n"
+    st.caption("Recebeu ▲ mais ou ▼ menos reclamações que no ano anterior"
+               f"{_nota_parcial(evo['igr_ano'])}  \n"
                f"Último trimestre: **{fmt_dec(atual.valor, 1)}** · média do mercado: {fmt_dec(mediana, 1)} "
                "(reclamações a cada 100 mil clientes)")  # fmt: skip
 
 
-def _aba_historico(c, dados: dict, evo: dict) -> None:
+def _aba_historico(c, dados: dict, evo: dict, reg: str) -> None:
     clientes, notas, queixas = st.columns(3)
     with clientes, _quadro("Evolução dos clientes"):
         _historico_clientes(evo)
     with notas, _quadro("Nota de qualidade por ano"):
-        _historico_qualidade(c, evo)
+        _historico_qualidade(c, evo, reg)
     with queixas, _quadro("Evolução das reclamações"):
         _historico_reclamacoes(evo, dados["mediana_igr"])
 
@@ -387,12 +393,20 @@ def _conteudo_ficha(reg: str) -> None:
         with resumo:
             _aba_resumo(c, dados, evo)
         with historico:
-            _aba_historico(c, dados, evo)
+            _aba_historico(c, dados, evo, reg)
         with contato:
             _aba_contato(reg, c)
 
 
+def fechar_ficha() -> None:
+    st.session_state.pop("_ficha", None)
+
+
 def abrir_ficha(reg: str) -> None:
-    """Abre a janela com o nome da operadora no título."""
+    """Abre a janela com o nome da operadora no título.
+
+    A ficha é redesenhada a cada interação interna (o seletor de temas), por isso quem fecha
+    de verdade é o `on_dismiss`.
+    """
     nome = ficha(reg)["cadastro"].nome
-    st.dialog(nome, width="large")(_conteudo_ficha)(reg)
+    st.dialog(nome, width="large", on_dismiss=fechar_ficha)(_conteudo_ficha)(reg)

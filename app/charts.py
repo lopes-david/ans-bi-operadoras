@@ -83,7 +83,8 @@ def linha(df: pd.DataFrame, formato, altura: int = 260, trimestral: bool = False
     return _estilo(alt.layer(area, traco, alvo, fim), altura)
 
 
-def colunas(df: pd.DataFrame, x: str, formato, rotulo_x=fmt_mes, altura: int = 260, valores: bool = False):
+def colunas(df: pd.DataFrame, x: str, formato, rotulo_x=fmt_mes, altura: int = 260, valores: bool = False,
+            cor: str = COR):
     """Colunas; com valores=True escreve o valor em cima de cada coluna e esconde o eixo Y."""
     dados = df.assign(_x=df[x].map(rotulo_x), _valor=df["valor"].map(formato))
     if valores:
@@ -92,7 +93,7 @@ def colunas(df: pd.DataFrame, x: str, formato, rotulo_x=fmt_mes, altura: int = 2
             y=alt.Y("valor:Q", axis=None, scale=alt.Scale(domainMin=0, nice=False, padding=18)),
             tooltip=[alt.Tooltip("_x:N", title="Ano"), alt.Tooltip("_valor:N", title="Total")],
         )
-        barras = base.mark_bar(color=COR, cornerRadiusTopLeft=4, cornerRadiusTopRight=4, size=26)
+        barras = base.mark_bar(color=cor, cornerRadiusTopLeft=4, cornerRadiusTopRight=4, size=26)
         texto = base.mark_text(dy=-8, fontSize=12, fontWeight="bold", color=TEXTO_FORTE).encode(text="_valor:N")
         return _estilo(alt.layer(barras, texto), altura)
     chart = (

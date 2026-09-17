@@ -223,10 +223,10 @@ def evolucao_operadora(reg: str, cobertura_igr: str | None) -> dict:
         "WHERE registro_ans = $reg AND indicador = 'IDSS' ORDER BY ano_avaliacao",
         reg=reg,
     )
-    partes_idss = db.q(
-        """SELECT indicador, valor FROM idss_indicadores
-           WHERE registro_ans = $reg AND indicador <> 'IDSS'
-             AND ano_avaliacao = (SELECT max(ano_avaliacao) FROM idss_indicadores WHERE registro_ans = $reg)""",
+    # as 4 partes do IDSS, ano a ano (a ANS só publica as partes a partir de 2016)
+    temas_idss = db.q(
+        """SELECT ano_avaliacao AS ano, indicador, valor FROM idss_indicadores
+           WHERE registro_ans = $reg AND indicador <> 'IDSS' ORDER BY ano_avaliacao""",
         reg=reg,
     )
     return {
@@ -240,7 +240,7 @@ def evolucao_operadora(reg: str, cobertura_igr: str | None) -> dict:
         "sairam": fluxo.sairam,
         "contratacao": contratacao,
         "idss": idss,
-        "partes_idss": dict(zip(partes_idss["indicador"], partes_idss["valor"], strict=True)),
+        "temas_idss": temas_idss,
     }
 
 

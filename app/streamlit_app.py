@@ -297,5 +297,8 @@ with col_lado:
                 )
             st.caption("🟢 bom · 🟡 atenção · 🔴 ruim · ⚪ sem dados — clique em uma operadora para ver os detalhes")
 
-if reg := st.session_state.pop("_abrir", None):
+# a ficha fica aberta entre execuções (os widgets dentro dela reexecutam o script)
+if escolhida := st.session_state.pop("_abrir", None):
+    st.session_state["_ficha"] = escolhida
+if reg := st.session_state.get("_ficha"):
     abrir_ficha(reg)
