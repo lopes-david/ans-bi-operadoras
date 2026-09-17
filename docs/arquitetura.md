@@ -4,6 +4,43 @@ Este documento registra as escolhas feitas em relação à proposta original
 (Lambda → S3 → Athena → QuickSight) e o motivo de cada uma. O critério foi sempre o mesmo:
 **menor custo operacional, sem perder desempenho, e reprodutível por qualquer pessoa**.
 
+## Como o pipeline funciona
+
+```mermaid
+flowchart LR
+    ANS[(Portal de dados<br/>abertos da ANS)]
+    SCH[EventBridge Scheduler<br/>diário]
+    PL[Lambda planner<br/>o que mudou?]
+    Q[[SQS<br/>1 msg por arquivo]]
+    WK[Lambda worker<br/>DuckDB · ARM64]
+    S3[(S3<br/>silver + gold<br/>Parquet)]
+    GL[Glue Catalog<br/>+ Athena]
+    CF[CloudFront<br/>dados públicos]
+    WEB[Painel Streamlit<br/>servidor próprio]
+
+    SCH --> PL -->|lista índices| ANS
+    PL --> Q --> WK
+    WK -->|baixa CSV/ZIP| ANS
+    WK -->|Parquet| S3
+    WK -->|registra tabelas| GL
+    GL -.SQL ad hoc.-> S3
+    S3 --> CF --> WEB
+```
+
+1. **Planner** (diário): lê os índices do portal da ANS e compara a data e o tamanho de cada
+   arquivo com marcadores gravados no S3. Só o que mudou vai para a fila. Nada é baixado nessa etapa.
+2. **Worker** (um arquivo por invocação, até 3 em paralelo): baixa o arquivo, converte o CSV
+   com DuckDB e grava uma partição Parquet (zstd) na **silver**. Arquivos grandes são agregados
+   já na entrada: o ICB de SP (~2,5 GB de CSV) vira ~700 KB, usando ~430 MB de RAM em ~20 s.
+3. **Gold**: quando a fila esvazia, o worker monta os marts (`src/ans_bi/sql/gold/*.sql`) e
+   publica os Parquet com nome imutável (cache de 1 ano no CloudFront) e um `manifest.json`
+   com cache curto. No mesmo passo, registra as tabelas no Glue para consultas SQL no Athena.
+4. **Painel**: o Streamlit carrega os marts (~6 MB) num DuckDB em memória. Cada filtro responde
+   em milissegundos. O painel lê a gold local ou a URL pública do CloudFront (`ANS_GOLD_URI`).
+
+Rodando localmente, é o mesmo código sem a fila: o `ans-bi run` faz o papel do planner e do worker
+em sequência, gravando em `data/lake/` no lugar do S3.
+
 ## O que foi mantido da proposta
 
 | Proposta | Implementação |
