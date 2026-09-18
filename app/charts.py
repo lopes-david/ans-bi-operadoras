@@ -83,8 +83,9 @@ def linha(df: pd.DataFrame, formato, altura: int = 260, trimestral: bool = False
     return _estilo(alt.layer(area, traco, alvo, fim), altura)
 
 
-def colunas(df: pd.DataFrame, x: str, formato, rotulo_x=fmt_mes, altura: int = 260, valores: bool = False,
-            cor: str = COR):
+def colunas(
+    df: pd.DataFrame, x: str, formato, rotulo_x=fmt_mes, altura: int = 260, valores: bool = False, cor: str = COR
+):
     """Colunas; com valores=True escreve o valor em cima de cada coluna e esconde o eixo Y."""
     dados = df.assign(_x=df[x].map(rotulo_x), _valor=df["valor"].map(formato))
     if valores:
@@ -104,5 +105,63 @@ def colunas(df: pd.DataFrame, x: str, formato, rotulo_x=fmt_mes, altura: int = 2
             y=alt.Y("valor:Q", axis=alt.Axis(labelExpr=COMPACTO, tickCount=4)),
             tooltip=[alt.Tooltip("_x:N", title="Período"), alt.Tooltip("_valor:N", title="Total")],
         )
+    )
+    return _estilo(chart, altura)
+
+
+CINZA = "rgba(150,155,165,0.45)"
+DESTAQUE = "#f2a03d"
+
+
+def dispersao(df: pd.DataFrame, x: str, y: str, rotulo: str, destaque: str, titulo_x: str, titulo_y: str,
+              altura: int = 230):  # fmt: skip
+    """Cada estado é um ponto; o estado aberto fica em destaque e os outros viram contexto cinza.
+
+    Serve para responder "esse estado é fora da curva?" sem precisar de tabela.
+    """
+    dados = df.assign(_destaque=df[rotulo] == destaque)
+    base = alt.Chart(dados).encode(
+        x=alt.X(f"{x}:Q", axis=alt.Axis(labelExpr=COMPACTO, tickCount=4, title=titulo_x, titleColor=TEXTO,
+                                        titleFontSize=11)),
+        y=alt.Y(f"{y}:Q", axis=alt.Axis(labelExpr=COMPACTO, tickCount=4, title=titulo_y, titleColor=TEXTO,
+                                        titleFontSize=11)),
+        tooltip=[alt.Tooltip(f"{rotulo}:N", title="Estado"), alt.Tooltip(f"{x}:Q", title=titulo_x, format=",.1f"),
+                 alt.Tooltip(f"{y}:Q", title=titulo_y, format=",.0f")],
+    )  # fmt: skip
+    outros = base.transform_filter("datum._destaque == false").mark_circle(size=90, color=CINZA)
+    aqui = base.transform_filter("datum._destaque").mark_point(size=180, filled=True, color=DESTAQUE, stroke="white",
+                                                               strokeWidth=1.5)  # fmt: skip
+    nome = (
+        base.transform_filter("datum._destaque")
+        .mark_text(dy=-16, fontSize=12, fontWeight="bold", color=TEXTO_FORTE)
+        .encode(text=f"{rotulo}:N")
+    )
+    return _estilo(alt.layer(outros, aqui, nome), altura)
+
+
+def colunas_comparadas(df: pd.DataFrame, x: str, serie: str, formato, altura: int = 200):
+    """Duas séries lado a lado (o estado e o Brasil) para ver onde ele foge da média."""
+    dados = df.assign(_valor=df["valor"].map(formato))
+    chart = (
+        alt.Chart(dados)
+        .mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3)
+        .encode(
+            x=alt.X(f"{x}:O", sort=None, axis=alt.Axis(labelAngle=0, labelFontSize=12)),
+            xOffset=alt.XOffset(f"{serie}:N", sort=None),
+            y=alt.Y("valor:Q", axis=alt.Axis(labelExpr=COMPACTO, tickCount=4)),
+            color=alt.Color(
+                f"{serie}:N",
+                sort=None,
+                scale=alt.Scale(range=[COR, CINZA]),
+                legend=alt.Legend(
+                    orient="top", direction="horizontal", title=None, labelColor=TEXTO, labelFontSize=12, offset=2
+                ),
+            ),
+            tooltip=[
+                alt.Tooltip(f"{x}:N", title="Faixa"),
+                alt.Tooltip(f"{serie}:N", title=""),
+                alt.Tooltip("_valor:N", title="Valor"),
+            ],
+        )  # fmt: skip
     )
     return _estilo(chart, altura)

@@ -35,14 +35,16 @@ def test_inicio_sem_estado(app):
 
 def test_operadoras_pela_sede(app):
     # ALFA tem sede em SP; BETA tem sede no RJ mas clientes em SP
-    at = app().run()
-    at.selectbox(key="uf").set_value("SP").run()
+    at = app()
+    at.query_params["uf"] = "SP"
+    at.run()
     assert not at.exception, [e.value for e in at.exception]
     assert at.subheader[0].value == "São Paulo"
     assert list(at.dataframe[0].value["nome"]) == ["ALFA"]
     assert list(at.dataframe[0].value["clientes"]) == [30]  # total no Brasil
 
-    at.selectbox(key="uf").set_value("RJ").run()
+    at.session_state["uf"] = "RJ"
+    at.run()
     assert list(at.dataframe[0].value["nome"]) == ["BETA ODONTO S.A."]
 
 
@@ -60,7 +62,7 @@ def test_filtrar_por_cidade_e_buscar(app):
     at.query_params["uf"] = "SP"
     at.run()
     cidade = at.selectbox(key="cidade-SP")
-    assert cidade.options == ["Todas", "São Paulo"]
+    assert cidade.options == ["Cidade: todas", "São Paulo"]
     cidade.set_value("São Paulo").run()
     assert list(at.dataframe[0].value["nome"]) == ["ALFA"]
     at.text_input(key="busca-SP").input("xyz").run()
@@ -83,7 +85,9 @@ def test_ficha_da_operadora(app):
     assert mercado.value.endswith("anos")  # registro em 2001
     resolvidas = next(m for m in at.metric if m.label == "Reclamações resolvidas")
     assert (resolvidas.value, resolvidas.delta) == ("—", "poucas para avaliar")
-    assert [t.label for t in at.tabs] == ["Resumo", "Histórico", "Contato"]
+    rotulos_abas = [t.label for t in at.tabs]
+    assert rotulos_abas[:2] == ["Operadoras", "Panorama do estado"]  # abas da página
+    assert rotulos_abas[-3:] == ["Resumo", "Histórico", "Contato"]  # abas da ficha
     textos = " ".join(m.value for m in at.markdown)
     assert "**Sobre a empresa**" in textos and "**Avaliação da ANS**" in textos
     assert "11\\.111\\.111/0001\\-11" in textos  # CNPJ formatado (escapado para Markdown)
@@ -92,7 +96,7 @@ def test_ficha_da_operadora(app):
     assert next(m for m in at.metric if m.label == "Qualidade (IDSS)").value == "8,1 de 10"
 
 
-def test_filtros_de_qualidade_e_ordem(app):
+def test_filtros_de_qualidade(app):
     at = app()
     at.query_params["uf"] = "SP"
     at.run()
@@ -102,18 +106,34 @@ def test_filtros_de_qualidade_e_ordem(app):
 
     at.multiselect(key="f_qualidade").set_value(["Ruim"]).run()
     assert at.dataframe[0].value.empty
-    assert "**0** operadoras" in " ".join(m.value for m in at.markdown)
+    assert "**0** operadoras" in " ".join(c.value for c in at.caption)
 
     at.multiselect(key="f_qualidade").set_value(["Muito boa", "Boa"]).run()
-    for ordem in (
-        ["melhor_qualidade"],
-        ["pior_qualidade", "mais_reclamacoes"],
-        ["menos_reclamacoes", "melhor_qualidade", "pior_qualidade"],
-        ["clientes", "mais_reclamacoes"],
-    ):
-        at.multiselect(key="ordem").set_value(ordem).run()
-        assert not at.exception, [e.value for e in at.exception]
-        assert list(at.dataframe[0].value["nome"]) == ["ALFA"]
+    assert not at.exception, [e.value for e in at.exception]
+    assert list(at.dataframe[0].value["nome"]) == ["ALFA"]
+    # a lista sai das maiores para as menores; reordenar é no cabeçalho da tabela (nativo do Streamlit)
+    assert list(at.dataframe[0].value["clientes"]) == sorted(at.dataframe[0].value["clientes"], reverse=True)
+
+
+def test_panorama_do_estado(app):
+    """A aba do panorama mostra os recordes do país; o estado abre em janela pelo mapa."""
+    at = app()
+    at.query_params["uf"] = "SP"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    textos = " ".join(m.value for m in at.markdown)
+    assert "Internações no Brasil" in textos or "não publicou internações" in " ".join(c.value for c in at.caption)
+
+
+def test_ficha_do_estado(app):
+    """Sem TISS nas fixtures, a janela do estado ainda abre e mostra o mercado."""
+    at = app()
+    at.session_state["_ficha_estado"] = "SP"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    textos = " ".join(m.value for m in at.markdown)
+    assert "Como o mercado cresceu" in textos and "Ano a ano" in textos
+    assert "Pessoas com plano" in [m.label for m in at.metric]
 
 
 def test_semaforo_de_reclamacoes():

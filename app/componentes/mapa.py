@@ -16,10 +16,22 @@ _componente = st.components.v2.component(
 )
 
 
-def mapa_brasil(valores: dict[str, dict], selecionado: str | None, key: str, on_clique) -> None:
+AZUL = ["#cde2fb", "#184f95"]  # aba das operadoras
+ROXO = ["#ded7f7", "#5b49b8"]  # aba dos estados: outra cor para não confundir as duas leituras
+
+
+def mapa_brasil(
+    valores: dict[str, dict],
+    selecionado: str | None,
+    key: str,
+    on_clique,
+    paleta: list[str] = AZUL,
+    legenda: tuple[str, str] = ("menos", "mais"),
+) -> None:
     """valores: {uf: {"nome", "valor" (define a cor), "texto" (dica)}}. O clique chega em st.session_state[key]["clique"]."""
     _componente(
-        data={"geo": estados(), "valores": valores, "selecionado": selecionado},
+        data={"geo": estados(), "valores": valores, "selecionado": selecionado,
+              "paleta": paleta, "legenda": list(legenda)},
         key=key,
         on_clique_change=on_clique,
-    )
+    )  # fmt: skip

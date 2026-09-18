@@ -44,7 +44,7 @@ testpaths = ["tests"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
-known-first-party = ["ans_bi", "charts", "classificacao", "componentes", "data", "ficha_operadora", "geo"]
+known-first-party = ["ans_bi", "charts", "classificacao", "componentes", "data", "ficha_estado", "ficha_operadora", "geo", "panorama_estado", "ui"]
 
 [tool.ruff.lint.per-file-ignores]
 "app/**" = ["E501"]

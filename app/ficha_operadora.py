@@ -271,10 +271,10 @@ ANOS_NO_GRAFICO = 6
 ANOS_NA_VARIACAO = 5
 
 
-def _por_ano(serie: pd.DataFrame, subir_e_bom: bool, ajustes: dict | None = None) -> None:
-    """Variação de cada ano contra o anterior, lado a lado ("2023 ▲ 42%").
+def _por_ano(serie: pd.DataFrame, subir_e_bom: bool, titulo: str, ajustes: dict | None = None) -> None:
+    """Variação de cada ano contra o anterior, lado a lado ("2023 +42%").
 
-    O que a seta significa fica na legenda do quadro, uma vez só, para não repetir em cada ano.
+    O rótulo vem antes dos números porque sem ele "+26%" é lido como se fosse o valor do ano.
     `ajustes` desconta da variação o que não é real (ex.: transferência de carteira) por ano.
     """
     itens = []
@@ -288,10 +288,11 @@ def _por_ano(serie: pd.DataFrame, subir_e_bom: bool, ajustes: dict | None = None
             selo = ":gray-badge[estável]"
         else:
             cor = "green" if (pct > 0) == subir_e_bom else "red"
-            selo = f":{cor}-badge[{'▲' if pct > 0 else '▼'} {fmt_dec(abs(pct), casas)}%]"
+            selo = f":{cor}-badge[{'+' if pct > 0 else '−'}{fmt_dec(abs(pct), casas)}%]"
         itens.append((ano, selo))
     itens = itens[-ANOS_NA_VARIACAO:]
     if itens:
+        st.caption(titulo)
         for col, (ano, selo) in zip(st.columns(len(itens), gap="xxsmall"), itens, strict=True):
             col.markdown(f"**{ano}**  \n{selo}", text_alignment="center")
 
@@ -311,16 +312,18 @@ def _historico_clientes(evo: dict) -> None:
     for salto in evo["saltos"]:
         ano = pd.Timestamp(salto["competencia"]).year
         ajustes[ano] = ajustes.get(ano, 0) + salto["variacao"]
-    _por_ano(evo["clientes_ano"], subir_e_bom=True, ajustes=ajustes)
-    texto = "Ganhou ou perdeu clientes ▲▼ em relação ao ano anterior" + _nota_parcial(evo["clientes_ano"])
+    _por_ano(
+        evo["clientes_ano"], subir_e_bom=True, titulo="Clientes a mais ou a menos que no ano anterior:", ajustes=ajustes
+    )
+    texto = _nota_parcial(evo["clientes_ano"]).removeprefix(" · ")
     if evo["saltos"]:
-        # a transferência de carteira não é crescimento real: fica fora da % e é explicada
+        # a transferência de carteira não é crescimento real: fica fora das % e é explicada
         salto = evo["saltos"][-1]
         outra = (salto["contraparte"] or "").rstrip(".")
-        de = f" {'vindos da' if salto['variacao'] > 0 else 'passados para a'} {_md(outra)}" if outra else ""
-        sinal = "+" if salto["variacao"] > 0 else "−"
-        texto += (f"  \nSem contar a transferência de {sinal}{fmt_compact(abs(salto['variacao']))} clientes{de} "
-                  f"em {fmt_mes(salto['competencia'])}.")  # fmt: skip
+        de = f" {'da' if salto['variacao'] > 0 else 'para a'} {_md(outra)}" if outra else ""
+        verbo = "recebeu" if salto["variacao"] > 0 else "passou"
+        texto += (f"  \nO degrau de {fmt_mes(salto['competencia'])} é transferência de carteira: "
+                  f"{verbo} {fmt_compact(abs(salto['variacao']))} clientes{de}.")  # fmt: skip
     st.caption(texto)
 
 
@@ -353,10 +356,9 @@ def _historico_reclamacoes(evo: dict, mediana) -> None:
         st.caption("A ANS não publicou índice de reclamações para esta operadora.")
         return
     st.altair_chart(charts.linha(serie, lambda v: fmt_dec(v, 1), altura=150, trimestral=True), width="stretch")
-    _por_ano(evo["igr_ano"], subir_e_bom=False)
+    _por_ano(evo["igr_ano"], subir_e_bom=False, titulo="Reclamações a mais ou a menos que no ano anterior:")
     atual = serie.iloc[-1]
-    st.caption("Recebeu ▲ mais ou ▼ menos reclamações que no ano anterior"
-               f"{_nota_parcial(evo['igr_ano'])}  \n"
+    st.caption(f"{_nota_parcial(evo['igr_ano']).removeprefix(' · ')}  \n"
                f"Último trimestre: **{fmt_dec(atual.valor, 1)}** · média do mercado: {fmt_dec(mediana, 1)} "
                "(reclamações a cada 100 mil clientes)")  # fmt: skip
 
