@@ -68,7 +68,12 @@ def _enable_s3(con: duckdb.DuckDBPyConnection) -> None:
     ]
     if creds.token:
         parts.append(f"SESSION_TOKEN {sql_literal(creds.token)}")
-    con.execute(f"CREATE SECRET lake ({', '.join(parts)})")
+    try:
+        con.execute(f"CREATE SECRET lake ({', '.join(parts)})")
+    except Exception as exc:
+        # o erro do DuckDB repete o comando inteiro; sem trocar a mensagem a chave iria para o log da Lambda.
+        # "from None" corta o encadeamento, que traria o comando de volta no traceback.
+        raise RuntimeError(f"falha ao criar o secret do S3 no DuckDB ({type(exc).__name__})") from None
 
 
 # --- controle de versões ------------------------------------------------------------------
